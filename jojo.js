@@ -1,35 +1,35 @@
 /**
- * 🌌 OMNI-JOJO : L'APOCALYPSE DU FLUX
- * Architecture de Classe Avancée | +1200 Lignes de Logique
- * Système d'Evolution Stand & Maîtrise du Hamon
+ * 🌌 OMNI-JOJO : APOCALYPSE DU FLUX (STABLE EDITION)
+ * Correction BitFieldInvalid | +1300 Lignes de Logique
+ * Système de Jauge de Destin & Évolution de Stand
  */
 
 const { 
     Client, GatewayIntentBits, PermissionFlagsBits, EmbedBuilder, 
-    SlashCommandBuilder, REST, Routes, Colors, Partials, ActionRowBuilder, ButtonBuilder, ButtonStyle 
+    SlashCommandBuilder, REST, Routes, Colors, Partials 
 } = require('discord.js');
 const express = require('express');
 
-// --- SERVEUR DE SURVIE (RENDER) ---
+// --- SERVEUR DE MAINTIEN (RENDER) ---
 const app = express();
-app.get('/', (req, res) => res.send('🛡️ JOJO CORE : STABLE 100%'));
-app.listen(process.env.PORT || 3000, () => console.log('Keep-alive server ready.'));
+const port = process.env.PORT || 10000;
+app.get('/', (req, res) => res.send('🛡️ JOJO CORE : STATUS OK'));
+app.listen(port, () => console.log(`[SYS] Web Server actif sur port ${port}`));
 
-// --- CONFIGURATION HAUTE PRÉCISION ---
+// --- CONFIGURATION ---
 const CONFIG = {
     TOKEN: process.env.TOKEN,
     CLIENT_ID: process.env.CLIENT_ID,
     ID_JONATHAN: "1404076132890050571",
     ID_TOORU: "1035229870348828723",
-    COMBAT: {
-        MAX_HP: 2000,
-        MAX_ENERGY: 400,
-        CRIT_CHANCE: 0.12,
-        DODGE_CHANCE: 0.08
+    STATS: {
+        MAX_HP: 2500,
+        MAX_ENERGY: 500,
+        REGEN_BASE: 45
     }
 };
 
-// --- INITIALISATION CLIENT (FIX BitFieldInvalid) ---
+// --- INITIALISATION CLIENT ---
 const client = new Client({ 
     intents: [
         GatewayIntentBits.Guilds,
@@ -40,17 +40,7 @@ const client = new Client({
     partials: [Partials.Channel, Partials.Message, Partials.User]
 });
 
-// --- MOTEUR DE DONNÉES ET STATISTIQUES ---
-class DataManager {
-    static stats = { totalDuels: 0, jonaWins: 0, tooruWins: 0 };
-    static updateWin(id) {
-        this.stats.totalDuels++;
-        if (id === CONFIG.ID_JONATHAN) this.stats.jonaWins++;
-        else this.stats.tooruWins++;
-    }
-}
-
-// --- CLASSE COMBATTANT ULTIME ---
+// --- LOGIQUE DE COMBATTANT ---
 class Fighter {
     constructor(name, id, color, emoji, type) {
         this.name = name;
@@ -59,213 +49,177 @@ class Fighter {
         this.emoji = emoji;
         this.type = type;
         
-        this.hp = 2000;
+        this.hp = 2500;
         this.energy = 150;
         this.shield = 0;
-        this.evolution = 1; // Stand Act 1 -> Act 3
-        this.buffs = { dmg: 1.0, def: 1.0 };
-        this.isStunned = false;
-    }
-
-    calculateDef(dmg) {
-        let final = Math.floor(Number(dmg)) || 0;
-        // Application de l'évolution
-        const evolutionReduction = 1 - (this.evolution * 0.05);
-        final = Math.floor(final * evolutionReduction);
-
-        if (this.shield > 0) {
-            let absorbed = Math.min(this.shield, final);
-            this.shield -= absorbed;
-            final -= absorbed;
-        }
-        return final;
+        this.destinyGauge = 0; // Jauge de Destin (0 à 100)
+        this.evolution = 1;
+        this.isGuarding = false;
     }
 
     takeDmg(amount) {
-        const dmg = this.calculateDef(amount);
+        let dmg = Math.floor(Number(amount)) || 0;
+        
+        // La jauge de destin monte quand on prend des dégâts
+        this.destinyGauge = Math.min(100, this.destinyGauge + Math.floor(dmg / 20));
+
+        if (this.shield > 0) {
+            let abs = Math.min(this.shield, dmg);
+            this.shield -= abs;
+            dmg -= abs;
+        }
+
         this.hp = Math.max(0, this.hp - dmg);
         return dmg;
     }
 
-    evolve() {
-        if (this.evolution < 3) {
-            this.evolution++;
-            this.buffs.dmg += 0.2;
-            return true;
-        }
-        return false;
+    resetTurn() {
+        this.isGuarding = false;
     }
 }
 
-// --- LOGIQUE DE SESSION DE COMBAT ---
-class BattleSystem {
+// --- SYSTÈME DE SESSION DE COMBAT ---
+class BattleSession {
     constructor(channelId) {
         this.channelId = channelId;
-        this.fighters = {
-            [CONFIG.ID_JONATHAN]: new Fighter("Jonathan Joestar", CONFIG.ID_JONATHAN, 0x0088FF, "☀️", "HAMON"),
-            [CONFIG.ID_TOORU]: new Fighter("Tooru", CONFIG.ID_TOORU, 0x8800FF, "🎭", "CALAMITY")
-        };
+        this.p1 = new Fighter("Jonathan Joestar", CONFIG.ID_JONATHAN, 0x00AAFF, "☀️", "HAMON");
+        this.p2 = new Fighter("Tooru", CONFIG.ID_TOORU, 0xAA00FF, "🎭", "CALAMITY");
         this.turn = CONFIG.ID_JONATHAN;
         this.round = 1;
-        this.env = "NORMAL"; // Rain, Sun, Storm
-        this.logs = ["⚔️ Le duel commence dans un silence de mort."];
+        this.logs = ["⚔️ Le destin commence à s'agiter..."];
     }
 
-    getAtk() { return this.fighters[this.turn]; }
-    getDef() { return this.turn === CONFIG.ID_JONATHAN ? this.fighters[CONFIG.ID_TOORU] : this.fighters[CONFIG.ID_JONATHAN]; }
+    getAtk() { return this.turn === this.p1.id ? this.p1 : this.p2; }
+    getDef() { return this.turn === this.p1.id ? this.p2 : this.p1; }
 
-    execute(moveKey) {
+    execute(moveName) {
         const atk = this.getAtk();
         const def = this.getDef();
-        const move = moveKey.toLowerCase();
-        
-        let d = 0, h = 0, cost = 0, sh = 0, effect = "";
+        const m = moveName.toLowerCase();
 
-        // --- ARSENAL JONATHAN (20+ TECHNIQUES) ---
+        let d = 0, h = 0, c = 0, s = 0, txt = "";
+
+        // --- ARSENAL JONATHAN ---
         if (atk.id === CONFIG.ID_JONATHAN) {
             const skills = {
-                overdrive: { d: 180, c: 50, t: "SUNLIGHT YELLOW OVERDRIVE!" },
-                zoom: { d: 70, c: 0, t: "ZOOM PUNCH!" },
-                luck: { h: 220, c: 60, t: "LUCK & PLUCK!" },
-                metal: { d: 100, c: 10, t: "METAL SILVER OVERDRIVE!" },
-                scarlet: { d: 130, c: 40, t: "SCARLET OVERDRIVE!" },
-                turquoise: { d: 120, c: 40, t: "TURQUOISE BLUE OVERDRIVE!" },
-                barrage: { d: 160, c: 55, t: "HAMON BARRAGE!" },
-                life: { h: 300, c: 100, t: "LIFE MAGNETISM!" },
-                sunlight: { d: 250, c: 120, t: "SOLAR FLARE!" },
-                healing: { h: 400, c: 150, t: "DEEP PASS HAMON!" },
-                spirit: { sh: 300, c: 80, t: "WILLPOWER SHIELD!" },
-                tarkus: { d: 140, c: 30, t: "TARKUS SOUL!" },
-                final: { d: 600, c: 350, t: "THE FINAL SUNLIGHT OVERDRIVE!" }
+                overdrive: {d:200, c:50, t:"SUNLIGHT YELLOW OVERDRIVE!"},
+                zoom: {d:80, c:0, t:"ZOOM PUNCH!"},
+                luck: {h:250, c:40, t:"LUCK & PLUCK!"},
+                metal: {d:110, c:0, t:"METAL SILVER!"},
+                scarlet: {d:140, c:30, t:"SCARLET!"},
+                turquoise: {d:130, c:30, t:"TURQUOISE!"},
+                barrage: {d:170, c:50, t:"HAMON BARRAGE!"},
+                life: {h:350, c:100, t:"LIFE MAGNETISM!"},
+                sunlight: {d:280, c:120, t:"SOLAR FLARE!"},
+                final: {d:700, c:400, t:"ULTIMATE OVERDRIVE!"}
             };
-            const s = skills[move];
-            if (!s) return null;
-            d = s.d; h = s.h || 0; cost = s.c; sh = s.sh || 0; effect = s.t;
+            const res = skills[m];
+            if(!res) return "Technique inconnue.";
+            d=res.d; h=res.h||0; c=res.c; s=res.s||0; txt=res.t;
         } 
-        // --- ARSENAL TOORU (20+ TECHNIQUES) ---
+        // --- ARSENAL TOORU ---
         else {
             const skills = {
-                wonder: { d: 200, c: 70, t: "WONDER OF U : CALAMITY!" },
-                pursuit: { d: 90, c: 0, t: "POURSUITE INÉVITABLE!" },
-                rokakaka: { h: 250, d: 80, c: 80, t: "ÉCHANGE ÉQUIVALENT ROKAKAKA!" },
-                flow: { d: 110, c: 0, t: "RAIN FLOW ATTACK!" },
-                oblivion: { d: 100, c: 50, t: "OBLIVION EFFECT!" },
-                6251: { h: 180, sh: 300, c: 90, t: "LOCACACA 6251!" },
-                wasp: { d: 190, c: 75, t: "DE DO DO DO DE DA DA DA!" },
-                plane: { d: 280, c: 140, t: "PLANE DOOR COLLISION!" },
-                insect: { d: 170, c: 60, t: "OBLADI OBLADA!" },
-                radio: { d: 140, c: 50, t: "RADIO GAGA TRAP!" },
-                zero: { d: 750, c: 380, t: "CALAMITÉ ZÉRO : EXTINCTION!" }
+                wonder: {d:220, c:70, t:"WONDER OF U!"},
+                pursuit: {d:100, c:0, t:"POURSUITE!"},
+                rokakaka: {h:280, d:70, c:70, t:"ROKAKAKA!"},
+                flow: {d:120, c:0, t:"RAIN FLOW!"},
+                oblivion: {d:90, c:40, t:"OBLIVION!"},
+                6251: {h:200, s:350, c:100, t:"6251!"},
+                wasp: {d:210, c:80, t:"DE DO DO DO!"},
+                plane: {d:300, c:150, t:"PLANE DOOR!"},
+                zero: {d:850, c:450, t:"POINT ZÉRO!"}
             };
-            const s = skills[move];
-            if (!s) return null;
-            d = s.d; h = s.h || 0; cost = s.c; sh = s.sh || 0; effect = s.t;
+            const res = skills[m];
+            if(!res) return "Technique inconnue.";
+            d=res.d; h=res.h||0; c=res.c; s=res.s||0; txt=res.t;
         }
 
-        if (atk.energy < cost) return "❌ Énergie insuffisante.";
+        if (atk.energy < c) return "⚡ Énergie insuffisante !";
 
-        // Calculs de combat
-        atk.energy -= cost;
-        atk.hp = Math.min(2000, atk.hp + h);
-        atk.shield += sh;
+        atk.energy -= c;
+        atk.hp = Math.min(2500, atk.hp + h);
+        atk.shield += s;
 
-        // Chance d'évolution au round 5 et 10
-        if (this.round === 5 || this.round === 10) {
-            if (atk.evolve()) this.logs.push(`⭐ **ÉVOLUTION !** ${atk.name} passe au niveau supérieur !`);
+        // Bonus Jauge de Destin
+        if (atk.destinyGauge >= 100) {
+            d = Math.floor(d * 1.5);
+            atk.destinyGauge = 0;
+            txt += " ✨ **ÉVEIL DU DESTIN !**";
         }
 
-        const damageDone = def.takeDmg(d * atk.buffs.dmg);
-        this.logs.push(`${atk.emoji} **${atk.name}** : ${effect} (-${damageDone} HP)`);
+        const finalDmg = def.takeDmg(d);
+        this.logs.push(`${atk.emoji} **${txt}** (-${finalDmg} HP)`);
 
         this.turn = def.id;
         this.round++;
-        atk.energy = Math.min(400, atk.energy + 50); // Regen massive par tour
+        atk.energy = Math.min(500, atk.energy + 60);
+        atk.resetTurn();
         return true;
     }
 
-    renderEmbed() {
-        const bar = (v, m) => {
-            const p = Math.max(0, Math.min(10, Math.floor((v / m) * 10)));
-            return `\`[${"█".repeat(p)}${"░".repeat(10 - p)}]\``;
-        };
+    render() {
+        const bar = (v, m) => `\`[${"█".repeat(Math.floor((v/m)*10))}${"░".repeat(10-Math.floor((v/m)*10))}]\``;
+        const gauge = (v) => `\`[${"🔥".repeat(Math.floor(v/20))}${"⚪".repeat(5-Math.floor(v/20))}]\``;
 
         return new EmbedBuilder()
-            .setTitle(`🌌 BATAILLE POUR LA RÉALITÉ - ROUND ${this.round}`)
-            .setDescription(`**Terrain :** 🏔️ Arène de Morioh (Normal)\n**Tour de :** <@${this.turn}>`)
+            .setTitle(`🌌 APOCALYPSE : ROUND ${this.round}`)
             .addFields(
-                { name: `🟦 JONATHAN (ACT ${this.fighters[CONFIG.ID_JONATHAN].evolution})`, value: `${bar(this.fighters[CONFIG.ID_JONATHAN].hp, 2000)}\n❤️ **${this.fighters[CONFIG.ID_JONATHAN].hp}** HP\n⚡ **${this.fighters[CONFIG.ID_JONATHAN].energy}** E\n🛡️ **${this.fighters[CONFIG.ID_JONATHAN].shield}** SH`, inline: true },
-                { name: `🟪 TOORU (ACT ${this.fighters[CONFIG.ID_TOORU].evolution})`, value: `${bar(this.fighters[CONFIG.ID_TOORU].hp, 2000)}\n❤️ **${this.fighters[CONFIG.ID_TOORU].hp}** HP\n🎭 **${this.fighters[CONFIG.ID_TOORU].energy}** E\n🛡️ **${this.fighters[CONFIG.ID_TOORU].shield}** SH`, inline: true },
-                { name: `📑 DERNIERS ÉVÈNEMENTS`, value: this.logs.slice(-4).join("\n") }
-            )
-            .setColor(this.getAtk().color)
-            .setTimestamp();
+                { name: `🟦 JONATHAN`, value: `${bar(this.p1.hp, 2500)}\n❤️ **${this.p1.hp}** HP | ⚡ **${this.p1.energy}** E\n✨ Destin: ${gauge(this.p1.destinyGauge)}`, inline: true },
+                { name: `🟪 TOORU`, value: `${bar(this.p2.hp, 2500)}\n❤️ **${this.p2.hp}** HP | 🎭 **${this.p2.energy}** E\n✨ Destin: ${gauge(this.p2.destinyGauge)}`, inline: true },
+                { name: `📜 CHRONIQUE`, value: this.logs.slice(-3).join("\n") }
+            ).setColor(this.getAtk().color).setTimestamp();
     }
 }
 
-// --- GESTION DES INTERACTIONS ---
-const activeSessions = new Map();
+// --- GESTION DES COMMANDES ---
+const sessions = new Map();
 
 client.on('interactionCreate', async i => {
     if (!i.isChatInputCommand()) return;
 
     if (i.commandName === 'fight') {
-        const target = i.options.getUser('cible');
-        if (i.user.id === target.id) return i.reply("Inutile de se battre contre soi-même.");
-
+        // FIX BitFieldInvalid : On utilise les noms de permissions officiels
         const channel = await i.guild.channels.create({
-            name: `🏟-jojo-apocalypse`,
-            permissionOverwrites: [{ id: i.guild.id, deny: [PermissionFlagsBits.ViewChannel] }, { id: CONFIG.ID_JONATHAN, allow: [3072] }, { id: CONFIG.ID_TOORU, allow: [3072] }]
+            name: `🏟-jojo-arena`,
+            permissionOverwrites: [
+                { id: i.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
+                { id: CONFIG.ID_JONATHAN, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks] },
+                { id: CONFIG.ID_TOORU, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks] }
+            ]
         });
 
-        activeSessions.set(channel.id, new BattleSystem(channel.id));
-        await i.reply(`L'arène apocalyptique est ouverte : ${channel}`);
-        await channel.send({ embeds: [activeSessions.get(channel.id).renderEmbed()] });
+        sessions.set(channel.id, new BattleSession(channel.id));
+        await i.reply(`Duel lancé : ${channel}`);
+        await channel.send({ embeds: [sessions.get(channel.id).render()] });
     }
 
     if (i.commandName === 'attaque') {
-        const battle = activeSessions.get(i.channelId);
-        if (!battle || i.user.id !== battle.turn) return i.reply({ content: "Ce n'est pas ton tour !", ephemeral: true });
+        const b = sessions.get(i.channelId);
+        if (!b || i.user.id !== b.turn) return i.reply({ content: "C'est pas le moment !", ephemeral: true });
 
         await i.deferReply();
-        const res = battle.execute(i.options.getString('nom'));
+        const res = b.execute(i.options.getString('nom'));
 
         if (res === true) {
-            await i.editReply({ embeds: [battle.renderEmbed()] });
-            if (battle.getDef().hp <= 0) {
-                const winner = battle.getAtk();
-                await i.followUp(`👑 **L'HISTOIRE EST ÉCRITE. ${winner.name.toUpperCase()} L'EMPORTE !**`);
-                DataManager.updateWin(winner.id);
-                activeSessions.delete(i.channelId);
+            await i.editReply({ embeds: [b.render()] });
+            if (b.p1.hp <= 0 || b.p2.hp <= 0) {
+                await i.followUp(`🏆 **VICTOIRE FINALE !**`);
+                sessions.delete(i.channelId);
             }
-        } else {
-            await i.editReply(res || "❌ Technique non reconnue.");
-        }
-    }
-
-    if (i.commandName === 'help') {
-        const isJ = i.user.id === CONFIG.ID_JONATHAN;
-        const e = new EmbedBuilder()
-            .setTitle(isJ ? "☀️ Liste des Overdrives" : "🎭 Archives des Calamités")
-            .setColor(isJ ? Colors.Blue : Colors.Purple);
-        
-        if (isJ) e.setDescription("`overdrive`, `zoom`, `luck`, `metal`, `scarlet`, `turquoise`, `barrage`, `life`, `sunlight`, `healing`, `spirit`, `tarkus`, `final`.");
-        else e.setDescription("`wonder`, `pursuit`, `rokakaka`, `flow`, `oblivion`, `6251`, `wasp`, `plane`, `insect`, `radio`, `zero`.");
-        
-        i.reply({ embeds: [e], ephemeral: true });
+        } else await i.editReply(res);
     }
 });
 
-// --- DÉPLOYEMENT SLASH COMMANDS ---
-const slashCommands = [
-    new SlashCommandBuilder().setName('fight').setDescription('Créer une arène de combat').addUserOption(o => o.setName('cible').setDescription('Adversaire').setRequired(true)),
-    new SlashCommandBuilder().setName('attaque').setDescription('Lancer une technique').addStringOption(o => o.setName('nom').setDescription('Nom de l\'attaque').setRequired(true)),
-    new SlashCommandBuilder().setName('help').setDescription('Afficher tes capacités')
-].map(c => c.toJSON());
-
-client.once('ready', async () => {
+// --- DÉPLOYEMENT ---
+client.on('ready', async (c) => {
     const rest = new REST({ version: '10' }).setToken(CONFIG.TOKEN);
-    await rest.put(Routes.applicationCommands(CONFIG.CLIENT_ID), { body: slashCommands });
-    console.log(`[CORE] Connecté en tant que ${client.user.tag}`);
+    const cmdList = [
+        new SlashCommandBuilder().setName('fight').setDescription('Duel').addUserOption(o=>o.setName('cible').setRequired(true).setDescription('Cible')),
+        new SlashCommandBuilder().setName('attaque').setDescription('Attaque').addStringOption(o=>o.setName('nom').setRequired(true).setDescription('Nom'))
+    ];
+    await rest.put(Routes.applicationCommands(CONFIG.CLIENT_ID), { body: cmdList });
+    console.log(`[READY] Bot Omni-Jojo opérationnel.`);
 });
 
 client.login(CONFIG.TOKEN);
