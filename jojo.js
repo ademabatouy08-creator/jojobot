@@ -1,256 +1,267 @@
 /**
- * 🌌 OMNI-JOJO ENGINE : THE CALAMITY VS THE SUN
- * Logiciel de combat ultra-complet pour Discord & Render
- * Features: Effets de statut, Stand Rush, Système de Critique, Persistence.
+ * 🌌 OMNI-JOJO FINAL ENGINE : ULTIMATE EDITION
+ * Jonathan Joestar vs Tooru (Wonder of U)
+ * Architecture Pro-Scale | Zéro NaN | Système de Critique & Esquive
  */
 
 const { 
     Client, GatewayIntentBits, PermissionFlagsBits, EmbedBuilder, 
-    SlashCommandBuilder, REST, Routes, Colors, ActionRowBuilder, ButtonBuilder, ButtonStyle 
+    SlashCommandBuilder, REST, Routes, Colors 
 } = require('discord.js');
 const express = require('express');
 
-// --- SERVEUR DE MAINTIEN RENDER (PORT 3000) ---
+// --- INITIALISATION DU SERVEUR DE MAINTIEN (RENDER) ---
 const app = express();
-app.get('/', (req, res) => res.send('⚔️ Moteur Jojo : PROTOCOLE ALPHA ACTIF'));
-app.listen(process.env.PORT || 3000, () => console.log('Web Server ready.'));
+const port = process.env.PORT || 3000;
+app.get('/', (req, res) => res.send('🛡️ PROTOCOLE JOJO : OPÉRATIONNEL'));
+app.listen(port, () => console.log(`[SYS] Web Server actif sur port ${port}`));
 
-// --- CONSTANTES DE JEU ---
+// --- CONFIGURATION GLOBALE ---
 const CONFIG = {
     TOKEN: process.env.TOKEN,
     CLIENT_ID: process.env.CLIENT_ID,
     ID_JONATHAN: "1404076132890050571",
     ID_TOORU: "1035229870348828723",
-    MAX_HP: 1000,
-    MAX_ENERGY: 200,
-    CRIT_MULT: 1.8
+    LIMITS: {
+        MAX_HP: 1500,
+        MAX_ENERGY: 300,
+        BASE_REGEN: 35
+    }
 };
 
-// --- MOTEUR DE STATUTS ---
-const STATUS_EFFECTS = {
-    BURNING: { name: "🔥 Brûlure", dmg: 25, duration: 3 },
-    CALAMITY: { name: "⚠️ Malédiction", dmg: 40, duration: 2 },
-    STUN: { name: "⚡ Paralysie", dmg: 0, duration: 1 },
-    REGEN: { name: "🌿 Régénération", dmg: -30, duration: 3 }
-};
+// --- MOTEUR DE CLASSES (POUR GONFLER LE CODE ET LA LOGIQUE) ---
 
-// --- CLASSES DU JEU ---
 class Fighter {
-    constructor(name, id, color, emoji) {
+    constructor(name, id, color, emoji, isJonathan) {
         this.name = name;
         this.id = id;
         this.color = color;
         this.emoji = emoji;
-        this.hp = CONFIG.MAX_HP;
-        this.energy = 60;
+        this.isJonathan = isJonathan;
+        
+        // Initialisation forcée (Anti-NaN)
+        this.hp = 1500;
+        this.energy = 80;
         this.shield = 0;
-        this.activeStatuses = [];
-        this.wins = 0; // Pourrait être lié à une DB
+        this.critChance = isJonathan ? 0.15 : 0.10;
+        this.dodgeChance = isJonathan ? 0.05 : 0.12;
+        this.defenseBase = 10;
     }
 
-    applyStatus(effect) {
-        this.activeStatuses.push({ ...effect });
+    // Système de calcul de dégâts complexe
+    receiveDamage(rawAmount) {
+        let amount = Math.floor(Number(rawAmount)) || 0;
+        
+        // Test d'esquive
+        if (Math.random() < this.dodgeChance) return { dmg: 0, type: "ESQUIVE" };
+
+        // Réduction défense
+        amount = Math.max(0, amount - this.defenseBase);
+
+        // Gestion bouclier
+        if (this.shield > 0) {
+            let absorbed = Math.min(this.shield, amount);
+            this.shield = Math.max(0, this.shield - absorbed);
+            amount = Math.max(0, amount - absorbed);
+        }
+
+        this.hp = Math.max(0, Math.floor(this.hp - amount));
+        return { dmg: amount, type: "NORMAL" };
     }
 
-    processStatuses() {
-        let totalDmg = 0;
-        let log = "";
-        this.activeStatuses = this.activeStatuses.filter(s => {
-            totalDmg += s.dmg;
-            s.duration--;
-            if (s.dmg !== 0) log += `\n${s.name} inflige ${s.dmg} dégâts à ${this.name}.`;
-            return s.duration > 0;
-        });
-        this.hp = Math.max(0, this.hp - totalDmg);
-        return log;
+    addEnergy(val) {
+        this.energy = Math.min(CONFIG.LIMITS.MAX_ENERGY, Math.floor(this.energy + Number(val)));
+    }
+
+    addHp(val) {
+        this.hp = Math.min(CONFIG.LIMITS.MAX_HP, Math.floor(this.hp + Number(val)));
     }
 }
 
-class BattleInstance {
+class BattleSession {
     constructor(channelId) {
         this.channelId = channelId;
-        this.fighters = {
-            [CONFIG.ID_JONATHAN]: new Fighter("Jonathan Joestar", CONFIG.ID_JONATHAN, Colors.Blue, "☀️"),
-            [CONFIG.ID_TOORU]: new Fighter("Tooru", CONFIG.ID_TOORU, Colors.Purple, "🎭")
-        };
+        this.p1 = new Fighter("Jonathan Joestar", CONFIG.ID_JONATHAN, 0x00AAFF, "☀️", true);
+        this.p2 = new Fighter("Tooru", CONFIG.ID_TOORU, 0xAA00FF, "🎭", false);
         this.turn = CONFIG.ID_JONATHAN;
         this.round = 1;
-        this.logs = ["✨ Une faille temporelle s'ouvre..."];
+        this.logs = ["✨ Le rideau se lève sur un duel millénaire."];
     }
 
-    getActor() { return this.fighters[this.turn]; }
-    getEnemy() { return this.turn === CONFIG.ID_JONATHAN ? this.fighters[CONFIG.ID_TOORU] : this.fighters[CONFIG.ID_JONATHAN]; }
+    getActor() { return this.turn === this.p1.id ? this.p1 : this.p2; }
+    getEnemy() { return this.turn === this.p1.id ? this.p2 : this.p1; }
 
-    executeMove(moveName) {
+    process(moveName) {
         const actor = this.getActor();
         const enemy = this.getEnemy();
-        const move = moveName.toLowerCase();
-        
-        let d = 0, h = 0, cost = 0, effect = null, flavor = "";
+        const m = moveName.toLowerCase();
 
-        // --- GESTION DES ATTAQUES JONATHAN (12 CAPACITÉS) ---
-        if (actor.id === CONFIG.ID_JONATHAN) {
+        let d = 0, h = 0, cost = 0, sh = 0, txt = "";
+
+        // --- ARSENAL JONATHAN (LOGIQUE MASSIVE) ---
+        if (actor.isJonathan) {
             const skills = {
-                overdrive: { d: 110, c: 40, f: "SUNLIGHT YELLOW OVERDRIVE!" },
-                zoom: { d: 50, c: 0, f: "ZOOM PUNCH!" },
-                luck: { h: 100, c: 20, f: "LUCK & PLUCK!" },
-                metal: { d: 60, c: 0, f: "METAL SILVER OVERDRIVE!", e: 30 },
-                scarlet: { d: 70, c: 25, f: "SCARLET OVERDRIVE!", s: STATUS_EFFECTS.BURNING },
-                turquoise: { d: 75, c: 25, f: "TURQUOISE BLUE OVERDRIVE!" },
-                barrage: { d: 95, c: 30, f: "HAMON BARRAGE!" },
-                life: { h: 150, c: 50, f: "LIFE MAGNETISM REGEN!", s: STATUS_EFFECTS.REGEN },
-                tarkus: { d: 85, c: 20, f: "TARKUS' POWER!" },
-                bravery: { d: 40, c: 10, f: "BRAVERY STANCE!", shield: 100 },
-                sunlight: { d: 130, c: 70, f: "SOLAR FLARE!" },
-                final: { d: 200, c: 150, f: "LAST TRICK!" }
+                overdrive: {d:140, c:45, t:"SUNLIGHT YELLOW OVERDRIVE!"},
+                zoom: {d:60, c:0, t:"ZOOM PUNCH!"},
+                luck: {h:150, c:40, t:"LUCK & PLUCK!"},
+                metal: {d:80, c:0, t:"METAL SILVER OVERDRIVE!"},
+                scarlet: {d:95, c:30, t:"SCARLET OVERDRIVE!"},
+                turquoise: {d:90, c:30, t:"TURQUOISE BLUE!"},
+                barrage: {d:120, c:40, t:"HAMON BARRAGE!"},
+                life: {h:200, c:70, t:"LIFE MAGNETISM!"},
+                tarkus: {d:105, c:25, t:"FORCE DE TARKUS!"},
+                bravery: {sh:250, c:50, t:"POSTURE DE BRAVOURE!"},
+                sunlight: {d:170, c:80, t:"SOLAR FLARE!"},
+                plis: {d:100, h:50, c:40, t:"HAMON DETECTOR!"},
+                healing: {h:300, c:120, t:"DEEP PASS HAMON!"},
+                wine: {d:125, c:45, t:"SNEEZE OVERDRIVE!"},
+                bubble: {d:145, c:60, t:"BUBBLE HAMON!"},
+                spirit: {sh:150, d:70, c:50, t:"WILLPOWER!"},
+                final: {d:350, c:250, t:"THE FINAL OVERDRIVE!"}
             };
-            const s = skills[move];
-            if (!s) return null;
-            d = s.d; h = s.h || 0; cost = s.c; effect = s.s || null; flavor = s.f;
-            if (s.e) actor.energy += s.e;
-            if (s.shield) actor.shield += s.shield;
+            const s = skills[m];
+            if(!s) return null;
+            d=s.d||0; h=s.h||0; cost=s.c||0; sh=s.sh||0; txt=s.t;
         } 
-        // --- GESTION DES ATTAQUES TOORU (12 CAPACITÉS) ---
+        // --- ARSENAL TOORU (LOGIQUE MASSIVE) ---
         else {
             const skills = {
-                wonder: { d: 130, c: 50, f: "WONDER OF U: CALAMITY!" },
-                pursuit: { d: 60, c: 0, f: "INÉVITABLE POURSUITE!" },
-                rokakaka: { h: 120, d: 50, c: 30, f: "ÉCHANGE ÉQUIVALENT ROKAKAKA!" },
-                flow: { d: 70, c: 0, f: "RAINDROPS ATTACK!" },
-                oblivion: { d: 40, c: 20, f: "OBLIVION EFFECT!", s: STATUS_EFFECTS.STUN },
-                endless: { d: 85, c: 30, f: "ENDLESS CALAMITY!", s: STATUS_EFFECTS.CALAMITY },
-                6251: { h: 80, c: 20, f: "LOCACACA 6251!", shield: 80 },
-                wasp: { d: 110, c: 45, f: "DE DO DO DO DE DA DA DA!" },
-                logic: { d: 100, c: 30, f: "LOGIC OF THIS WORLD!" },
-                radio: { d: 80, c: 25, f: "RADIO GAGA TRAP!" },
-                calamity_wall: { d: 90, c: 20, f: "WALL COLLAPSE!" },
-                zero: { d: 220, c: 180, f: "POINT ZERO DISASTER!" }
+                wonder: {d:160, c:60, t:"WONDER OF U!"},
+                pursuit: {d:80, c:0, t:"POURSUITE INCESSANTE!"},
+                rokakaka: {h:180, d:60, c:50, t:"ROKAKAKA FRUIT!"},
+                flow: {d:90, c:0, t:"RAIN FLOW!"},
+                oblivion: {d:70, c:35, t:"OBLIVION!"},
+                endless: {d:115, c:45, t:"ENDLESS CALAMITY!"},
+                6251: {h:120, sh:180, c:50, t:"LOCACACA 6251!"},
+                wasp: {d:140, c:55, t:"DE DO DO DO DE DA DA DA!"},
+                logic: {d:130, c:45, t:"LOGIQUE DU MONDE!"},
+                radio: {d:100, c:40, t:"RADIO GAGA!"},
+                calamity_wall: {d:110, sh:100, c:40, t:"WALL COLLAPSE!"},
+                insect: {d:145, c:55, t:"OBLADI OBLADA!"},
+                plane: {d:180, c:90, t:"PLANE DOOR FALL!"},
+                cane: {d:95, c:25, t:"CANE STRIKE!"},
+                identity: {d:125, h:60, c:45, t:"SATORU AKEFU!"},
+                trap: {sh:200, d:50, c:60, t:"CALAMITY TRAP!"},
+                zero: {d:380, c:280, t:"CALAMITÉ ZÉRO!"}
             };
-            const s = skills[move];
-            if (!s) return null;
-            d = s.d; h = s.h || 0; cost = s.c; effect = s.s || null; flavor = s.f;
-            if (s.shield) actor.shield += s.shield;
+            const s = skills[m];
+            if(!s) return null;
+            d=s.d||0; h=s.h||0; cost=s.c||0; sh=s.sh||0; txt=s.t;
         }
 
-        if (actor.energy < cost) return "❌ Énergie insuffisante !";
+        if (actor.energy < cost) return "⚡ Énergie insuffisante !";
 
-        // Calcul final
+        // Traitement Technique
         actor.energy -= cost;
-        if (effect) enemy.applyStatus(effect);
-        
-        let finalDmg = d;
-        if (enemy.shield > 0) {
-            let absorbed = Math.min(enemy.shield, finalDmg);
-            enemy.shield -= absorbed;
-            finalDmg -= absorbed;
-        }
-        enemy.hp = Math.max(0, enemy.hp - finalDmg);
-        actor.hp = Math.min(CONFIG.MAX_HP, actor.hp + h);
+        actor.addHp(h);
+        actor.shield += sh;
 
-        this.logs.push(`**${actor.emoji} ${actor.name}**: ${flavor} (-${finalDmg} HP)`);
-        
-        // Fin de tour
-        const statusLog = enemy.processStatuses();
-        if (statusLog) this.logs.push(statusLog);
+        // Calcul Critique
+        let isCrit = Math.random() < actor.critChance;
+        let finalDmg = isCrit ? Math.floor(d * 1.5) : d;
 
+        const res = enemy.receiveDamage(finalDmg);
+        
+        let logMsg = `${actor.emoji} **${txt}**`;
+        if (res.type === "ESQUIVE") logMsg += ` 💨 **ESQUIVÉ !**`;
+        else logMsg += ` 💥 **-${res.dmg} HP** ${isCrit ? "‼️ (CRITIQUE)" : ""}`;
+
+        this.logs.push(logMsg);
         this.turn = enemy.id;
         this.round++;
-        actor.energy = Math.min(CONFIG.MAX_ENERGY, actor.energy + 20); // Regen passive
+        actor.addEnergy(CONFIG.LIMITS.BASE_REGEN);
         return true;
     }
 
-    createEmbed() {
-        const createBar = (curr, max) => {
-            const p = Math.round((curr / max) * 10);
-            return `\`[${"█".repeat(Math.max(0,p))}${"░".repeat(Math.max(0,10-p))}]\``;
+    render() {
+        const bar = (curr, max) => {
+            const size = 12;
+            const p = Math.max(0, Math.min(size, Math.floor((curr / max) * size)));
+            return `\`[${"█".repeat(p)}${"░".repeat(size - p)}]\``;
         };
 
-        const j = this.fighters[CONFIG.ID_JONATHAN];
-        const t = this.fighters[CONFIG.ID_TOORU];
-
         return new EmbedBuilder()
-            .setTitle(`🌌 DUEL ÉPIQUE : ROUND ${this.round}`)
+            .setTitle(`🏟️ ARÈNE DU DESTIN : ROUND ${this.round}`)
             .setColor(this.getActor().color)
             .addFields(
-                { name: `🟦 ${j.name}`, value: `${createBar(j.hp, CONFIG.MAX_HP)}\n❤️ **${j.hp}** HP | ⚡ **${j.energy}** E\n🛡️ Bouclier: ${j.shield}`, inline: true },
-                { name: `🟪 ${t.name}`, value: `${createBar(t.hp, CONFIG.MAX_HP)}\n❤️ **${t.hp}** HP | 🎭 **${t.energy}** E\n🛡️ Bouclier: ${t.shield}`, inline: true },
-                { name: `📜 Journal de Combat`, value: this.logs.slice(-4).join("\n") || "Silence avant la tempête..." }
+                { name: `🟦 JONATHAN`, value: `${bar(this.p1.hp, 1500)}\n❤️ **${this.p1.hp}** HP\n⚡ **${this.p1.energy}** E\n🛡️ **${this.p1.shield}** SH`, inline: true },
+                { name: `🟪 TOORU`, value: `${bar(this.p2.hp, 1500)}\n❤️ **${this.p2.hp}** HP\n🎭 **${this.p2.energy}** E\n🛡️ **${this.p2.shield}** SH`, inline: true },
+                { name: `📜 CHRONIQUE DU COMBAT`, value: this.logs.slice(-4).join("\n") }
             )
-            .setFooter({ text: `Tour actuel : ${this.getActor().name}` })
+            .setFooter({ text: `Au tour de : ${this.getActor().name}` })
             .setTimestamp();
     }
 }
 
-// --- INITIALISATION CLIENT ---
-const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMembers] });
-const battles = new Map();
+// --- INITIALISATION BOT ---
+
+const client = new Client({ intents: [32767] });
+const arenas = new Map();
 
 client.on('interactionCreate', async i => {
     if (!i.isChatInputCommand()) return;
 
     if (i.commandName === 'fight') {
         const target = i.options.getUser('cible');
-        if (![i.user.id, target.id].includes(CONFIG.ID_JONATHAN) || ![i.user.id, target.id].includes(CONFIG.ID_TOORU)) {
-            return i.reply({ content: "Seuls les élus du destin peuvent combattre ici.", ephemeral: true });
-        }
+        if (i.user.id === target.id) return i.reply("Auto-combat impossible.");
         
         const channel = await i.guild.channels.create({
-            name: `🏟-jojo-arena`,
+            name: `🏟-jojo-final`,
             permissionOverwrites: [
                 { id: i.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
-                { id: CONFIG.ID_JONATHAN, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
-                { id: CONFIG.ID_TOORU, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] }
+                { id: CONFIG.ID_JONATHAN, allow: [3072] },
+                { id: CONFIG.ID_TOORU, allow: [3072] }
             ]
         });
 
-        battles.set(channel.id, new BattleInstance(channel.id));
-        await i.reply(`L'arène est prête : ${channel}`);
-        await channel.send({ content: "Le destin est scellé !", embeds: [battles.get(channel.id).createEmbed()] });
+        arenas.set(channel.id, new BattleSession(channel.id));
+        await i.reply(`L'arène finale est prête : ${channel}`);
+        await channel.send({ embeds: [arenas.get(channel.id).render()] });
     }
 
     if (i.commandName === 'attaque') {
-        const battle = battles.get(i.channelId);
-        if (!battle || i.user.id !== battle.turn) return i.reply({ content: "Ce n'est pas ton tour ou mauvais salon.", ephemeral: true });
+        const arena = arenas.get(i.channelId);
+        if (!arena) return i.reply({ content: "Aucun combat ici.", ephemeral: true });
+        if (i.user.id !== arena.turn) return i.reply({ content: "C'est le tour de ton adversaire !", ephemeral: true });
 
         await i.deferReply();
-        const move = i.options.getString('nom');
-        const result = battle.executeMove(move);
-
-        if (result === true) {
-            await i.editReply({ embeds: [battle.createEmbed()] });
-            if (battle.getEnemy().hp <= 0) {
-                await i.followUp(`🏆 **${battle.getActor().name} A TRIOMPHÉ !**`);
-                battles.delete(i.channelId);
-                setTimeout(() => i.channel.delete().catch(() => {}), 60000);
+        const success = arena.process(i.options.getString('nom'));
+        
+        if (success === true) {
+            await i.editReply({ embeds: [arena.render()] });
+            if (arena.p1.hp <= 0 || arena.p2.hp <= 0) {
+                const winner = arena.p1.hp > 0 ? arena.p1 : arena.p2;
+                await i.followUp(`👑 **${winner.name.toUpperCase()} A REMPORTÉ LA VICTOIRE !**`);
+                arenas.delete(i.channelId);
+                setTimeout(() => i.channel.delete().catch(() => {}), 120000);
             }
         } else {
-            await i.editReply(result || "Attaque inconnue. Tape `/help`.");
+            await i.editReply(success || "⚠️ Nom d'attaque invalide.");
         }
     }
 
     if (i.commandName === 'help') {
-        const isJ = i.user.id === CONFIG.ID_JONATHAN;
-        const isT = i.user.id === CONFIG.ID_TOORU;
-        if (!isJ && !isT) return i.reply("Privé.");
+        const j = i.user.id === CONFIG.ID_JONATHAN;
+        const t = i.user.id === CONFIG.ID_TOORU;
+        if (!j && !t) return i.reply("Accès refusé.");
 
-        const e = new EmbedBuilder().setTitle("📜 Liste des techniques").setColor(isJ ? Colors.Blue : Colors.Purple);
-        if (isJ) e.setDescription("**Hamon:** `overdrive`, `zoom`, `luck`, `metal`, `scarlet`, `turquoise`, `barrage`, `life`, `tarkus`, `bravery`, `sunlight`, `final`.");
-        else e.setDescription("**Calamité:** `wonder`, `pursuit`, `rokakaka`, `flow`, `oblivion`, `endless`, `6251`, `wasp`, `logic`, `radio`, `calamity_wall`, `zero`.");
-        i.reply({ embeds: [e], ephemeral: true });
+        const hEmbed = new EmbedBuilder().setTitle(j ? "📖 Grimoire de Jonathan" : "📖 Archive de Tooru").setColor(j ? 0x00AAFF : 0xAA00FF);
+        if (j) hEmbed.setDescription("**Hamon :** `overdrive`, `zoom`, `luck`, `metal`, `scarlet`, `turquoise`, `barrage`, `life`, `tarkus`, `bravery`, `sunlight`, `plis`, `healing`, `wine`, `bubble`, `spirit`, `final`.");
+        else hEmbed.setDescription("**Calamité :** `wonder`, `pursuit`, `rokakaka`, `flow`, `oblivion`, `endless`, `6251`, `wasp`, `logic`, `radio`, `calamity_wall`, `insect`, `plane`, `cane`, `identity`, `trap`, `zero`.");
+        
+        return i.reply({ embeds: [hEmbed], ephemeral: true });
     }
 });
 
-// --- ENREGISTREMENT COMMANDES ---
-const commands = [
-    new SlashCommandBuilder().setName('fight').setDescription('Lancer un duel').addUserOption(o=>o.setName('cible').setDescription('Adversaire').setRequired(true)),
-    new SlashCommandBuilder().setName('attaque').setDescription('Utiliser une technique').addStringOption(o=>o.setName('nom').setDescription('Nom de l\'attaque').setRequired(true)),
-    new SlashCommandBuilder().setName('help').setDescription('Voir tes attaques')
-].map(c => c.toJSON());
-
 client.once('ready', async () => {
     const rest = new REST({ version: '10' }).setToken(CONFIG.TOKEN);
-    await rest.put(Routes.applicationCommands(CONFIG.CLIENT_ID), { body: commands });
-    console.log('Bot is Online.');
+    const slash = [
+        new SlashCommandBuilder().setName('fight').setDescription('Créer un duel').addUserOption(o=>o.setName('cible').setDescription('Adversaire').setRequired(true)),
+        new SlashCommandBuilder().setName('attaque').setDescription('Lancer une technique').addStringOption(o=>o.setName('nom').setDescription('Nom de l\'attaque').setRequired(true)),
+        new SlashCommandBuilder().setName('help').setDescription('Afficher tes techniques secrètes')
+    ];
+    await rest.put(Routes.applicationCommands(CONFIG.CLIENT_ID), { body: slash });
+    console.log(`[READY] Bot Omni-Jojo opérationnel.`);
 });
 
 client.login(CONFIG.TOKEN);
