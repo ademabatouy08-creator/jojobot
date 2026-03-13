@@ -21,7 +21,7 @@ const CONFIG = {
     TOKEN: process.env.TOKEN, // À configurer sur Render (Dashboard > Environment)
     CLIENT_ID: process.env.CLIENT_ID, // À configurer sur Render
     ID_JONATHAN: "1404076132890050571",
-    ID_TOORU: "1035229870348828723",
+    ID_TOORU: "1320710402602172510",
     STATS: {
         MAX_HP: 600,
         MAX_ENERGY: 120,
