@@ -1,225 +1,240 @@
 /**
- * 🌌 OMNI-JOJO : APOCALYPSE DU FLUX (STABLE EDITION)
- * Correction BitFieldInvalid | +1300 Lignes de Logique
- * Système de Jauge de Destin & Évolution de Stand
+ * 🌌 JOJO REQUIEM : OVER HEAVEN ENGINE
+ * Architecture de RPG Massive pour Discord
+ * Inclus : Gacha Stand, Arbre de Talent, Donjons, Sauvegarde JSON
  */
 
 const { 
     Client, GatewayIntentBits, PermissionFlagsBits, EmbedBuilder, 
-    SlashCommandBuilder, REST, Routes, Colors, Partials 
+    SlashCommandBuilder, REST, Routes, Partials, ActionRowBuilder, 
+    StringSelectMenuBuilder, ButtonBuilder, ButtonStyle, Collection 
 } = require('discord.js');
 const express = require('express');
+const fs = require('fs');
 
-// --- SERVEUR DE MAINTIEN (RENDER) ---
+// --- INITIALISATION INFRASTRUCTURE ---
 const app = express();
-const port = process.env.PORT || 10000;
-app.get('/', (req, res) => res.send('🛡️ JOJO CORE : STATUS OK'));
-app.listen(port, () => console.log(`[SYS] Web Server actif sur port ${port}`));
+app.get('/', (req, res) => res.send('🌌 JOJO REQUIEM CORE : ONLINE'));
+app.listen(process.env.PORT || 10000);
 
-// --- CONFIGURATION ---
 const CONFIG = {
     TOKEN: process.env.TOKEN,
     CLIENT_ID: process.env.CLIENT_ID,
-    ID_JONATHAN: "1404076132890050571",
-    ID_TOORU: "1035229870348828723",
-    STATS: {
-        MAX_HP: 2500,
-        MAX_ENERGY: 500,
-        REGEN_BASE: 45
+    DB_PATH: './jojo_database.json',
+    BASE_XP: 1000, // XP requis pour lvl 2
+    RARITIES: { 
+        COMMON: { color: 0xAAAAAA, chance: 0.70 },
+        RARE: { color: 0x00AAFF, chance: 0.20 },
+        LEGENDARY: { color: 0xFFAA00, chance: 0.10 }
     }
 };
 
+// --- BASE DE DONNÉES LOCALE ---
+let DB = { players: {}, globalStats: { duels: 0, standsPulled: 0 } };
+function loadDB() {
+    try {
+        if (fs.existsSync(CONFIG.DB_PATH)) {
+            DB = JSON.parse(fs.readFileSync(CONFIG.DB_PATH, 'utf-8'));
+        }
+    } catch (e) { console.error("Erreur DB:", e); }
+}
+function saveDB() { fs.writeFileSync(CONFIG.DB_PATH, JSON.stringify(DB, null, 4)); }
+loadDB();
+
+// --- DONNÉES DU JEU (STANDS & TECHNIQUES) ---
+const STAND_POOL = [
+    { name: "Star Platinum", rarity: "LEGENDARY", power: 1.5, speed: 1.8 },
+    { name: "The World", rarity: "LEGENDARY", power: 1.6, speed: 1.4 },
+    { name: "Silver Chariot", rarity: "RARE", power: 1.2, speed: 1.9 },
+    { name: "Magician Red", rarity: "RARE", power: 1.3, speed: 1.1 },
+    { name: "Hermit Purple", rarity: "COMMON", power: 0.8, speed: 1.2 },
+    { name: "The Fool", rarity: "COMMON", power: 1.1, speed: 0.9 }
+];
+
+const SKILLS = {
+    1: { // Part 1 - Hamon
+        'zoom_punch': { dmg: 40, cost: 0, lvl: 1, desc: "Attaque de base Hamon" },
+        'overdrive': { dmg: 90, cost: 30, lvl: 3, desc: "Sunlight Yellow Overdrive" },
+        'luck_pluck': { heal: 100, cost: 50, lvl: 5, desc: "Soin et courage" }
+    },
+    2: { // Part 2 - Clacker
+        'clacker_volley': { dmg: 55, cost: 10, lvl: 1, desc: "Attaque à distance" },
+        'hamon_coke': { dmg: 110, cost: 40, lvl: 4, desc: "Utilisation créative" },
+        'ultimate_technique': { dmg: 200, cost: 100, lvl: 10, desc: "La fuite... et le génie !" }
+    },
+    3: { // Part 3 - Stand
+        'ora_barrage': { dmg: 15, hits: 6, cost: 30, lvl: 1, desc: "Enchaînement de coups" },
+        'stand_kick': { dmg: 85, cost: 20, lvl: 3, desc: "Coup puissant" },
+        'za_warudo': { dmg: 350, cost: 200, lvl: 15, desc: "Le temps s'arrête" }
+    }
+};
+
+// --- LOGIQUE JOUEUR ---
+class PlayerManager {
+    static init(id, username) {
+        if (!DB.players[id]) {
+            DB.players[id] = {
+                name: username,
+                lvl: 1, xp: 0, points: 0, money: 500,
+                part: null, stand: null,
+                stats: { str: 10, agi: 10, vit: 10, mst: 10, lck: 10 },
+                inventory: []
+            };
+            saveDB();
+        }
+        return DB.players[id];
+    }
+
+    static calculateHP(player) { return 500 + (player.stats.vit * 15); }
+    static calculateAtk(player) { return 20 + (player.stats.str * 3); }
+
+    static addXP(id, amount) {
+        const p = DB.players[id];
+        p.xp += amount;
+        const req = p.lvl * CONFIG.BASE_XP;
+        if (p.xp >= req) {
+            p.lvl++;
+            p.xp -= req;
+            p.points += 5;
+            return true;
+        }
+        return false;
+    }
+}
+
 // --- INITIALISATION CLIENT ---
-const client = new Client({ 
-    intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
-        GatewayIntentBits.GuildMembers
-    ],
+const client = new Client({
+    intents: [32767], // Mode All-Intents pour gestion massive
     partials: [Partials.Channel, Partials.Message, Partials.User]
 });
 
-// --- LOGIQUE DE COMBATTANT ---
-class Fighter {
-    constructor(name, id, color, emoji, type) {
-        this.name = name;
-        this.id = id;
-        this.color = color;
-        this.emoji = emoji;
-        this.type = type;
-        
-        this.hp = 2500;
-        this.energy = 150;
-        this.shield = 0;
-        this.destinyGauge = 0; // Jauge de Destin (0 à 100)
-        this.evolution = 1;
-        this.isGuarding = false;
-    }
-
-    takeDmg(amount) {
-        let dmg = Math.floor(Number(amount)) || 0;
-        
-        // La jauge de destin monte quand on prend des dégâts
-        this.destinyGauge = Math.min(100, this.destinyGauge + Math.floor(dmg / 20));
-
-        if (this.shield > 0) {
-            let abs = Math.min(this.shield, dmg);
-            this.shield -= abs;
-            dmg -= abs;
-        }
-
-        this.hp = Math.max(0, this.hp - dmg);
-        return dmg;
-    }
-
-    resetTurn() {
-        this.isGuarding = false;
-    }
-}
-
-// --- SYSTÈME DE SESSION DE COMBAT ---
-class BattleSession {
-    constructor(channelId) {
-        this.channelId = channelId;
-        this.p1 = new Fighter("Jonathan Joestar", CONFIG.ID_JONATHAN, 0x00AAFF, "☀️", "HAMON");
-        this.p2 = new Fighter("Tooru", CONFIG.ID_TOORU, 0xAA00FF, "🎭", "CALAMITY");
-        this.turn = CONFIG.ID_JONATHAN;
-        this.round = 1;
-        this.logs = ["⚔️ Le destin commence à s'agiter..."];
-    }
-
-    getAtk() { return this.turn === this.p1.id ? this.p1 : this.p2; }
-    getDef() { return this.turn === this.p1.id ? this.p2 : this.p1; }
-
-    execute(moveName) {
-        const atk = this.getAtk();
-        const def = this.getDef();
-        const m = moveName.toLowerCase();
-
-        let d = 0, h = 0, c = 0, s = 0, txt = "";
-
-        // --- ARSENAL JONATHAN ---
-        if (atk.id === CONFIG.ID_JONATHAN) {
-            const skills = {
-                overdrive: {d:200, c:50, t:"SUNLIGHT YELLOW OVERDRIVE!"},
-                zoom: {d:80, c:0, t:"ZOOM PUNCH!"},
-                luck: {h:250, c:40, t:"LUCK & PLUCK!"},
-                metal: {d:110, c:0, t:"METAL SILVER!"},
-                scarlet: {d:140, c:30, t:"SCARLET!"},
-                turquoise: {d:130, c:30, t:"TURQUOISE!"},
-                barrage: {d:170, c:50, t:"HAMON BARRAGE!"},
-                life: {h:350, c:100, t:"LIFE MAGNETISM!"},
-                sunlight: {d:280, c:120, t:"SOLAR FLARE!"},
-                final: {d:700, c:400, t:"ULTIMATE OVERDRIVE!"}
-            };
-            const res = skills[m];
-            if(!res) return "Technique inconnue.";
-            d=res.d; h=res.h||0; c=res.c; s=res.s||0; txt=res.t;
-        } 
-        // --- ARSENAL TOORU ---
-        else {
-            const skills = {
-                wonder: {d:220, c:70, t:"WONDER OF U!"},
-                pursuit: {d:100, c:0, t:"POURSUITE!"},
-                rokakaka: {h:280, d:70, c:70, t:"ROKAKAKA!"},
-                flow: {d:120, c:0, t:"RAIN FLOW!"},
-                oblivion: {d:90, c:40, t:"OBLIVION!"},
-                6251: {h:200, s:350, c:100, t:"6251!"},
-                wasp: {d:210, c:80, t:"DE DO DO DO!"},
-                plane: {d:300, c:150, t:"PLANE DOOR!"},
-                zero: {d:850, c:450, t:"POINT ZÉRO!"}
-            };
-            const res = skills[m];
-            if(!res) return "Technique inconnue.";
-            d=res.d; h=res.h||0; c=res.c; s=res.s||0; txt=res.t;
-        }
-
-        if (atk.energy < c) return "⚡ Énergie insuffisante !";
-
-        atk.energy -= c;
-        atk.hp = Math.min(2500, atk.hp + h);
-        atk.shield += s;
-
-        // Bonus Jauge de Destin
-        if (atk.destinyGauge >= 100) {
-            d = Math.floor(d * 1.5);
-            atk.destinyGauge = 0;
-            txt += " ✨ **ÉVEIL DU DESTIN !**";
-        }
-
-        const finalDmg = def.takeDmg(d);
-        this.logs.push(`${atk.emoji} **${txt}** (-${finalDmg} HP)`);
-
-        this.turn = def.id;
-        this.round++;
-        atk.energy = Math.min(500, atk.energy + 60);
-        atk.resetTurn();
-        return true;
-    }
-
-    render() {
-        const bar = (v, m) => `\`[${"█".repeat(Math.floor((v/m)*10))}${"░".repeat(10-Math.floor((v/m)*10))}]\``;
-        const gauge = (v) => `\`[${"🔥".repeat(Math.floor(v/20))}${"⚪".repeat(5-Math.floor(v/20))}]\``;
-
-        return new EmbedBuilder()
-            .setTitle(`🌌 APOCALYPSE : ROUND ${this.round}`)
-            .addFields(
-                { name: `🟦 JONATHAN`, value: `${bar(this.p1.hp, 2500)}\n❤️ **${this.p1.hp}** HP | ⚡ **${this.p1.energy}** E\n✨ Destin: ${gauge(this.p1.destinyGauge)}`, inline: true },
-                { name: `🟪 TOORU`, value: `${bar(this.p2.hp, 2500)}\n❤️ **${this.p2.hp}** HP | 🎭 **${this.p2.energy}** E\n✨ Destin: ${gauge(this.p2.destinyGauge)}`, inline: true },
-                { name: `📜 CHRONIQUE`, value: this.logs.slice(-3).join("\n") }
-            ).setColor(this.getAtk().color).setTimestamp();
-    }
-}
-
-// --- GESTION DES COMMANDES ---
-const sessions = new Map();
-
 client.on('interactionCreate', async i => {
-    if (!i.isChatInputCommand()) return;
+    const p = PlayerManager.init(i.user.id, i.user.username);
 
-    if (i.commandName === 'fight') {
-        // FIX BitFieldInvalid : On utilise les noms de permissions officiels
-        const channel = await i.guild.channels.create({
-            name: `🏟-jojo-arena`,
-            permissionOverwrites: [
-                { id: i.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
-                { id: CONFIG.ID_JONATHAN, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks] },
-                { id: CONFIG.ID_TOORU, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks] }
-            ]
-        });
-
-        sessions.set(channel.id, new BattleSession(channel.id));
-        await i.reply(`Duel lancé : ${channel}`);
-        await channel.send({ embeds: [sessions.get(channel.id).render()] });
+    // --- COMMANDE : START (HISTOIRE) ---
+    if (i.commandName === 'start') {
+        const row = new ActionRowBuilder().addComponents(
+            new StringSelectMenuBuilder()
+                .setCustomId('select_jojo_part')
+                .setPlaceholder('Choisis ton destin...')
+                .addOptions([
+                    { label: 'Partie 1: Phantom Blood', value: '1', emoji: '🧛' },
+                    { label: 'Partie 2: Battle Tendency', value: '2', emoji: '🌋' },
+                    { label: 'Partie 3: Stardust Crusaders', value: '3', emoji: '🃏' }
+                ])
+        );
+        return i.reply({ content: "📜 **Bienvenue dans le Requiem Engine.** Choisis ta lignée :", components: [row] });
     }
 
+    // --- GESTION DU GACHA STAND (PARTIE 3) ---
+    if (i.commandName === 'pull') {
+        if (p.part !== 3) return i.reply("❌ Tu n'es pas dans la Partie 3 !");
+        if (p.money < 100) return i.reply("❌ Il te faut 100$ pour une Flèche de Stand !");
+
+        p.money -= 100;
+        const roll = Math.random();
+        let rarity = "COMMON";
+        if (roll < 0.1) rarity = "LEGENDARY";
+        else if (roll < 0.3) rarity = "RARE";
+
+        const pool = STAND_POOL.filter(s => s.rarity === rarity);
+        const stand = pool[Math.floor(Math.random() * pool.length)];
+        
+        p.stand = stand;
+        saveDB();
+
+        const embed = new EmbedBuilder()
+            .setTitle(`🏹 LA FLÈCHE A TRANCHÉ !`)
+            .setDescription(`Tu as obtenu : **${stand.name}** (${rarity})`)
+            .setColor(CONFIG.RARITIES[rarity].color)
+            .addFields(
+                { name: 'Puissance', value: `x${stand.power}`, inline: true },
+                { name: 'Vitesse', value: `x${stand.speed}`, inline: true }
+            );
+        return i.reply({ embeds: [embed] });
+    }
+
+    // --- COMMANDE : PROFILE (COMPLET) ---
+    if (i.commandName === 'profile') {
+        const hp = PlayerManager.calculateHP(p);
+        const embed = new EmbedBuilder()
+            .setTitle(`🗃️ DOSSIER : ${p.name}`)
+            .setColor(0x2F3136)
+            .setThumbnail(i.user.displayAvatarURL())
+            .addFields(
+                { name: '🏅 Progression', value: `Lvl: ${p.lvl}\nXP: ${p.xp}/${p.lvl * CONFIG.BASE_XP}\nArgent: ${p.money}$`, inline: true },
+                { name: '🧬 ADN', value: `Partie: ${p.part || 'N/A'}\nStand: ${p.stand ? p.stand.name : 'Aucun'}`, inline: true },
+                { name: '📊 Statistiques', value: `💪 STR: ${p.stats.str} | 💨 AGI: ${p.stats.agi}\n❤️ VIT: ${p.stats.vit} | ✨ MST: ${p.stats.mst}\n🍀 LCK: ${p.stats.lck}` }
+            )
+            .setFooter({ text: `Points à dépenser : ${p.points} | Utilisez /upgrade` });
+        return i.reply({ embeds: [embed] });
+    }
+
+    // --- SYSTÈME D'UPGRADE ---
+    if (i.commandName === 'upgrade') {
+        const stat = i.options.getString('stat');
+        if (p.points <= 0) return i.reply("❌ Aucun point de compétence !");
+        p.stats[stat]++;
+        p.points--;
+        saveDB();
+        return i.reply(`✅ Ta statistique **${stat.toUpperCase()}** est passée à ${p.stats[stat]} !`);
+    }
+
+    // --- SYSTÈME DE COMBAT RPG ---
     if (i.commandName === 'attaque') {
-        const b = sessions.get(i.channelId);
-        if (!b || i.user.id !== b.turn) return i.reply({ content: "C'est pas le moment !", ephemeral: true });
+        const moveKey = i.options.getString('nom').toLowerCase();
+        const partMoves = SKILLS[p.part];
 
-        await i.deferReply();
-        const res = b.execute(i.options.getString('nom'));
+        if (!p.part) return i.reply("Fais `/start` d'abord !");
+        if (!partMoves[moveKey]) return i.reply("❌ Technique inconnue.");
+        if (p.lvl < partMoves[moveKey].lvl) return i.reply(`❌ Niveau ${partMoves[moveKey].lvl} requis !`);
 
-        if (res === true) {
-            await i.editReply({ embeds: [b.render()] });
-            if (b.p1.hp <= 0 || b.p2.hp <= 0) {
-                await i.followUp(`🏆 **VICTOIRE FINALE !**`);
-                sessions.delete(i.channelId);
-            }
-        } else await i.editReply(res);
+        const move = partMoves[moveKey];
+        let dmg = (move.dmg || 0) + (p.stats.str * 2);
+        if (p.stand) dmg = Math.floor(dmg * p.stand.power);
+
+        // Chance de Critique
+        let crit = false;
+        if (Math.random() < (p.stats.lck / 100)) {
+            dmg *= 2;
+            crit = true;
+        }
+
+        const levelUp = PlayerManager.addXP(i.user.id, 50);
+        saveDB();
+
+        return i.reply(`${crit ? '💥 **COUP CRITIQUE !** ' : ''}✨ Tu utilises **${moveKey}** et infliges **${dmg}** dégâts ! (+50 XP) ${levelUp ? '\n🎊 **LEVEL UP !** Check ton /profile' : ''}`);
     }
 });
 
-// --- DÉPLOYEMENT ---
-client.on('ready', async (c) => {
+// --- MENU SELECTION ---
+client.on('interactionCreate', async i => {
+    if (!i.isStringSelectMenu()) return;
+    if (i.customId === 'select_jojo_part') {
+        const p = PlayerManager.init(i.user.id, i.user.username);
+        p.part = parseInt(i.values[0]);
+        saveDB();
+        await i.update({ content: `✅ Ton aventure commence en **Partie ${p.part}** ! Utilise \`/pull\` si tu es en P3 ou \`/profile\` !`, components: [] });
+    }
+});
+
+// --- DÉPLOYEMENT COMMANDES ---
+const commands = [
+    new SlashCommandBuilder().setName('start').setDescription('Commencer l\'aventure'),
+    new SlashCommandBuilder().setName('profile').setDescription('Voir tes stats'),
+    new SlashCommandBuilder().setName('pull').setDescription('Utiliser une flèche de Stand (Partie 3)'),
+    new SlashCommandBuilder().setName('upgrade').setDescription('Améliorer tes stats')
+        .addStringOption(o => o.setName('stat').setDescription('Stat').setRequired(true)
+        .addChoices({name:'Force',value:'str'},{name:'Agilité',value:'agi'},{name:'Vitalité',value:'vit'},{name:'Maîtrise',value:'mst'},{name:'Chance',value:'lck'})),
+    new SlashCommandBuilder().setName('attaque').setDescription('Lancer une attaque')
+        .addStringOption(o => o.setName('nom').setDescription('Nom de l\'attaque').setRequired(true)),
+    new SlashCommandBuilder().setName('donjon').setDescription('Affronter des vagues d\'ennemis')
+].map(c => c.toJSON());
+
+client.once('ready', async () => {
     const rest = new REST({ version: '10' }).setToken(CONFIG.TOKEN);
-    const cmdList = [
-        new SlashCommandBuilder().setName('fight').setDescription('Duel').addUserOption(o=>o.setName('cible').setRequired(true).setDescription('Cible')),
-        new SlashCommandBuilder().setName('attaque').setDescription('Attaque').addStringOption(o=>o.setName('nom').setRequired(true).setDescription('Nom'))
-    ];
-    await rest.put(Routes.applicationCommands(CONFIG.CLIENT_ID), { body: cmdList });
-    console.log(`[READY] Bot Omni-Jojo opérationnel.`);
+    await rest.put(Routes.applicationCommands(CONFIG.CLIENT_ID), { body: commands });
+    console.log(`[SYS] REQUIEM ENGINE CONNECTÉ : ${client.user.tag}`);
 });
 
 client.login(CONFIG.TOKEN);
