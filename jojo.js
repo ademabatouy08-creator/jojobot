@@ -351,4 +351,192 @@ function applyComboBonus(dmg) {
 const FINAL_INIT = () => {
     logAction("Système d'extension chargé.");
 };
-FINAL_INIT();
+const express = require('express');
+const app = express();
+const PORT = process.env.PORT || 3000;
+app.get('/', (req, res) => {
+    res.send('Olympus Engine est en ligne. Statut : OK');
+});
+app.listen(PORT, () => {
+    console.log(`Serveur de liaison Olympus actif sur le port ${PORT}`);
+});
+
+const QUEST_GENERATOR = {
+    titles: ["Traquer le traître", "Récupérer la flèche", "Protéger la ville", "Duel sanglant"],
+    rewards: [500, 1000, 2500, 5000],
+    generate: () => {
+        const i = Math.floor(Math.random() * QUEST_GENERATOR.titles.length);
+        return { title: QUEST_GENERATOR.titles[i], cash: QUEST_GENERATOR.rewards[i] };
+    }
+};
+
+const VAMPIRE_LOGIC = {
+    burn: (p) => {
+        if (p.race === "Vampire" && !TIME_SYSTEM.isDay()) return 0;
+        if (p.race === "Vampire" && TIME_SYSTEM.isDay()) return 100;
+        return 0;
+    }
+};
+
+const HAMON_SYSTEM = {
+    training_cost: 5000,
+    learn: (id) => {
+        const p = DATA.players[id];
+        if (p.money >= HAMON_SYSTEM.training_cost) {
+            p.money -= HAMON_SYSTEM.training_cost;
+            p.race = "Hamon";
+            saveSystem();
+            return true;
+        }
+        return false;
+    }
+};
+
+const STAND_REQUIAEM_CHANCE = 0.01;
+function tryRequiem(id) {
+    const p = DATA.players[id];
+    if (Math.random() < STAND_REQUIAEM_CHANCE) {
+        p.stand.rarity = "REQUIEM";
+        p.stand.dmg *= 3;
+        saveSystem();
+        return true;
+    }
+    return false;
+}
+
+const ARENA_QUEUE = [];
+function joinQueue(id) {
+    if (!ARENA_QUEUE.includes(id)) ARENA_QUEUE.push(id);
+    if (ARENA_QUEUE.length >= 2) {
+        const p1 = ARENA_QUEUE.shift();
+        const p2 = ARENA_QUEUE.shift();
+        return { p1, p2 };
+    }
+    return null;
+}
+
+const MATERIAL_EXCHANGE = {
+    "iron_to_gold": { in: 10, out: 1 },
+    "gold_to_diamond": { in: 5, out: 1 }
+};
+
+function exchangeMaterials(id, type) {
+    const p = DATA.players[id];
+    const formula = MATERIAL_EXCHANGE[type];
+    if (p.materials[type.split('_')[0]] >= formula.in) {
+        p.materials[type.split('_')[0]] -= formula.in;
+        p.materials[type.split('_')[2]] += formula.out;
+        saveSystem();
+    }
+}
+
+const GLOBAL_NOTIFICATIONS = [];
+function pushNotif(msg) {
+    GLOBAL_NOTIFICATIONS.push(msg);
+    if (GLOBAL_NOTIFICATIONS.length > 5) GLOBAL_NOTIFICATIONS.shift();
+}
+
+const LOOT_RARITY_LOGIC = (luck) => {
+    const roll = Math.random() + luck;
+    if (roll > 1.2) return "LEGENDARY";
+    if (roll > 0.9) return "RARE";
+    return "COMMON";
+};
+
+const CLAN_VAULT = new Map();
+function depositToVault(clanName, amount) {
+    const current = CLAN_VAULT.get(clanName) || 0;
+    CLAN_VAULT.set(clanName, current + amount);
+}
+
+const SPEEDWAGON_BUFF = (p) => {
+    if (p.clan === "Speedwagon") return 1.15;
+    return 1.0;
+};
+
+const BATTLE_XP_CALC = (winnerLvl, loserLvl) => {
+    const diff = loserLvl - winnerLvl;
+    return Math.max(50, 150 + (diff * 10));
+};
+
+const COMBO_BREAKER = (p) => {
+    return p.stats.res > 100 ? 0.2 : 0;
+};
+
+const ITEM_DURABILITY = new Map();
+function checkBroken(itemId) {
+    const dur = ITEM_DURABILITY.get(itemId) || 100;
+    return dur <= 0;
+}
+
+const WORLD_STATE = {
+    isUnderSiege: false,
+    siegeProgress: 0
+};
+
+function applySiegeDmg(id) {
+    if (WORLD_STATE.isUnderSiege) {
+        DATA.players[id].hp -= 50;
+    }
+}
+
+const PRESTIGE_REWARDS = {
+    1: "Badge de Bronze",
+    5: "Badge d'Or",
+    10: "Aura Divine"
+};
+
+function getPrestigeReward(lvl) {
+    return PRESTIGE_REWARDS[lvl] || "Aucune";
+}
+
+const FAST_TRAVEL_ZONES = ["Morioh", "Naples", "Le Caire"];
+function canFastTravel(p) {
+    return p.money >= 500 && p.lvl >= 20;
+}
+
+const STAND_STORAGE = new Map();
+function storeStand(id, stand) {
+    STAND_STORAGE.set(id, stand);
+}
+
+const TAX_OFFICE = {
+    balance: 0,
+    tax: (amt) => {
+        const t = amt * 0.1;
+        TAX_OFFICE.balance += t;
+        return amt - t;
+    }
+};
+
+const CRITICAL_ERROR_RECOVERY = () => {
+    console.log("Tentative de récupération des données...");
+    saveSystem();
+};
+
+const BOT_HEARTBEAT = setInterval(() => {
+    console.log(`[HB] Joueurs: ${Object.keys(DATA.players).length}`);
+}, 3600000);
+
+const PLAYER_STATUS_FLAGS = {
+    isBanned: (id) => false,
+    isMuted: (id) => false
+};
+
+const XP_CURVE = (lvl) => Math.floor(100 * Math.pow(lvl, 1.5));
+
+const SESSION_METRICS = {
+    commandsExecuted: 0,
+    duelsFinished: 0
+};
+
+const RESOURCE_REGEN = () => {
+    Object.values(DATA.players).forEach(p => {
+        p.money += 1;
+    });
+};
+
+const FINAL_WAKEUP = () => {
+    console.log("Boucle principale Olympus attachée au port " + PORT);
+};
+FINAL_WAKEUP();
