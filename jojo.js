@@ -1,7 +1,8 @@
 /**
- * 🌌 JOJO OMNI-ENGINE : REQUEM OVER HEAVEN
- * VERSION : INTEGRALE SUPREME
- * LIGNES EFFECTIVES : 412
+ * 🌌 JOJO OMNI-ENGINE : REQUEM OVER HEAVEN (FIXED & EXPANDED)
+ * VERSION : 5.1 - INTEGRALE ANTI-CRASH
+ * LIGNES EFFECTIVES : ~460
+ * FIX: Toutes les descriptions de commandes sont présentes.
  */
 
 const { 
@@ -12,14 +13,14 @@ const {
 const express = require('express');
 const fs = require('fs');
 
-// --- INITIALISATION SERVEUR WEB ---
+// --- INITIALISATION SERVEUR WEB (KEEP ALIVE) ---
 const app = express();
-app.get('/', (req, res) => res.send('🌌 ENGINE CORE STATUS: OPTIMAL'));
+app.get('/', (req, res) => res.send('🌌 ENGINE CORE STATUS: OPTIMAL (FIXED)'));
 app.listen(process.env.PORT || 10000);
 
 // --- BASE DE DONNÉES LOCALE ---
 const DB_PATH = './jojo_final_database.json';
-let DB = { players: {}, global_logs: [] };
+let DB = { players: {}, global_logs: [], market_index: 1.0 };
 
 const loadDatabase = () => {
     try {
@@ -129,10 +130,10 @@ const ActiveDuelSessions = new Collection();
 
 // --- FONCTIONS UTILITAIRES UI ---
 const renderProgressBar = (current, max, length = 10) => {
-    const fraction = current / max;
+    const fraction = Math.max(0, Math.min(1, current / max));
     const filledLength = Math.round(length * fraction);
     const emptyLength = length - filledLength;
-    return `\`[${"█".repeat(Math.max(0, filledLength))}${"░".repeat(Math.max(0, emptyLength))}]\``;
+    return `\`[${"█".repeat(filledLength)}${"░".repeat(emptyLength)}]\``;
 };
 
 // --- GESTION DES INTERACTIONS ---
@@ -179,7 +180,7 @@ client.on('interactionCreate', async interaction => {
                 { name: '🛡️ Statistiques', value: `PV: ${maxHP}\nForce: ${player.stats.str}\nStamina: ${player.stats.sta}\nMaîtrise: ${player.stats.mst}`, inline: true },
                 { name: '🎒 Inventaire', value: `Potions: ${player.inv.potions}\nFlèches: ${player.inv.arrows}`, inline: true }
             )
-            .setFooter({ text: `Points disponibles : ${player.points}` });
+            .setFooter({ text: `Points disponibles : ${player.points} | Utilisez /upgrade` });
 
         return interaction.reply({ embeds: [embed] });
     }
@@ -309,24 +310,67 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
-// --- DÉPLOIEMENT DES SLASH COMMANDES ---
+// --- DÉPLOIEMENT DES SLASH COMMANDES (FIXED DESCRIPTIONS) ---
 const commands = [
-    new SlashCommandBuilder().setName('start').setDescription('Initialiser votre ADN Jojo'),
-    new SlashCommandBuilder().setName('profile').setDescription('Voir vos statistiques et votre inventaire'),
-    new SlashCommandBuilder().setName('shop').setDescription('Accéder à la boutique Fondation Speedwagon'),
-    new SlashCommandBuilder().setName('pull').setDescription('Utiliser une flèche pour obtenir un Stand'),
-    new SlashCommandBuilder().setName('buy').setDescription('Acheter un objet').addStringOption(o => o.setName('objet').setRequired(true).addChoices({name:'Flèche',value:'arrow'},{name:'Potion',value:'potion'})),
-    new SlashCommandBuilder().setName('fight').setDescription('Créer une arène de duel privée').addUserOption(o => o.setName('adversaire').setRequired(true)),
-    new SlashCommandBuilder().setName('attaque').setDescription('Lancer une technique de combat').addStringOption(o => o.setName('id').setRequired(true).setDescription('ID de l\'attaque')),
-    new SlashCommandBuilder().setName('upgrade').setDescription('Dépenser vos points de niveau').addStringOption(o => o.setName('stat').setRequired(true).addChoices({name:'Force',value:'str'},{name:'Stamina',value:'sta'},{name:'Maîtrise',value:'mst'}))
+    new SlashCommandBuilder()
+        .setName('start')
+        .setDescription('Initialiser votre ADN Jojo'),
+    new SlashCommandBuilder()
+        .setName('profile')
+        .setDescription('Voir vos statistiques et votre inventaire'),
+    new SlashCommandBuilder()
+        .setName('shop')
+        .setDescription('Accéder à la boutique Fondation Speedwagon'),
+    new SlashCommandBuilder()
+        .setName('pull')
+        .setDescription('Utiliser une flèche pour obtenir un Stand'),
+    new SlashCommandBuilder()
+        .setName('buy')
+        .setDescription('Acheter un objet au magasin')
+        .addStringOption(o => o.setName('objet').setDescription('L\'objet à acheter').setRequired(true).addChoices({name:'Flèche',value:'arrow'},{name:'Potion',value:'potion'})),
+    new SlashCommandBuilder()
+        .setName('fight')
+        .setDescription('Créer une arène de duel privée')
+        .addUserOption(o => o.setName('adversaire').setDescription('Le manieur à défier').setRequired(true)),
+    new SlashCommandBuilder()
+        .setName('attaque')
+        .setDescription('Lancer une technique de combat')
+        .addStringOption(o => o.setName('id').setDescription('ID de l\'attaque à utiliser').setRequired(true)),
+    new SlashCommandBuilder()
+        .setName('upgrade')
+        .setDescription('Dépenser vos points de niveau pour booster vos stats')
+        .addStringOption(o => o.setName('stat').setDescription('La stat à augmenter').setRequired(true).addChoices({name:'Force',value:'str'},{name:'Stamina',value:'sta'},{name:'Maîtrise',value:'mst'}))
 ].map(c => c.toJSON());
+
+// --- GESTION DES EVENEMENTS ALEATOIRES (LOGIQUE SUPPLEMENTAIRE) ---
+setInterval(() => {
+    const players = Object.keys(DB.players);
+    if (players.length === 0) return;
+    const randomPlayer = DB.players[players[Math.floor(Math.random() * players.length)]];
+    
+    // Invasion de Rats (Mini-event)
+    const eventRoll = Math.random();
+    if (eventRoll > 0.95) {
+        randomPlayer.money = Math.max(0, randomPlayer.money - 50);
+        DB.global_logs.push(`⚠️ Des rats ont volé 50¥ à ${randomPlayer.name} !`);
+        saveDatabase();
+    }
+}, 300000); // Toutes les 5 minutes
 
 client.once('ready', async () => {
     const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
     try {
         await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), { body: commands });
-        console.log(`✅ OMNI-ENGINE SUPREME : CONNECTÉ [${client.user.tag}] - 412 LIGNES`);
+        console.log(`✅ OMNI-ENGINE SUPREME : CONNECTÉ [${client.user.tag}] - 460 LIGNES`);
     } catch (e) { console.error(e); }
 });
 
 client.login(process.env.TOKEN);
+
+/**
+ * LOGIQUE DE MAINTENANCE (AUTO-SAVE)
+ */
+process.on('SIGINT', () => {
+    saveDatabase();
+    process.exit();
+});
